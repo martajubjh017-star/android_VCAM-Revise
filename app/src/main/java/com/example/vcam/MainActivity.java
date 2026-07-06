@@ -17,12 +17,19 @@ import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.Switch;
 import android.widget.Toast;
+import android.widget.FrameLayout;
+import android.view.Gravity;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import java.io.FileOutputStream;
+import java.io.InputStream;
 
 import java.io.File;
 import java.io.IOException;
 
 public class MainActivity extends Activity {
 
+    private static final int PICK_MEDIA = 1001;
     private Switch force_show_switch;
     private Switch disable_switch;
     private Switch play_sound_switch;
@@ -194,6 +201,21 @@ public class MainActivity extends Activity {
             }
         });
 
+        Button pick_button = new Button(this);
+        pick_button.setText("Выбрать фото / видео (VCAM)");
+        FrameLayout.LayoutParams vcam_lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        vcam_lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        vcam_lp.bottomMargin = 48;
+        addContentView(pick_button, vcam_lp);
+        pick_button.setOnClickListener(v -> {
+            if (!has_permission()) { request_permission(); return; }
+            Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("*/*");
+            intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(Intent.createChooser(intent, "VCAM"), PICK_MEDIA);
+        });
+
     }
 
     private void request_permission() {
@@ -212,7 +234,47 @@ public class MainActivity extends Activity {
         }
     }
 
-    private boolean has_permission() {
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PICK_MEDIA && resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
+            Uri uri = data.getData();
+            String type = getContentResolver().getType(uri);
+            try {
+                File dir = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/");
+                if (!dir.exists()) dir.mkdirs();
+                if (type != null && type.startsWith("video")) {
+                    copyUriToFile(uri, new File(dir, "virtual.mp4"));
+                    Toast.makeText(this, "Видео OK", Toast.LENGTH_SHORT).show();
+                } else {
+                    InputStream is = getContentResolver().openInputStream(uri);
+                    Bitmap bmp = BitmapFactory.decodeStream(is);
+                    if (is != null) is.close();
+                    if (bmp == null) { Toast.makeText(this, "Фото ?", Toast.LENGTH_SHORT).show(); return; }
+                    FileOutputStream fos = new FileOutputStream(new File(dir, "1000.bmp"));
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 95, fos);
+                    fos.close();
+                    Toast.makeText(this, "Фото: конвертация...", Toast.LENGTH_SHORT).show();
+                    boolean ok = PhotoToVideo.convert(bmp, 1280, 720, 4, 15, new File(dir, "virtual.mp4").getAbsolutePath());
+                    Toast.makeText(this, ok ? "Готово (Camera2 OK)" : "Видео ?", Toast.LENGTH_LONG).show();
+                }
+            } catch (Exception e) {
+                Toast.makeText(this, "Err: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void copyUriToFile(Uri uri, File out) throws java.io.IOException {
+        InputStream in = getContentResolver().openInputStream(uri);
+        FileOutputStream fos = new FileOutputStream(out);
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) > 0) fos.write(buf, 0, n);
+        fos.close();
+        if (in != null) in.close();
+    }
+
+        private boolean has_permission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             return this.checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_DENIED
                     && this.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_DENIED;
