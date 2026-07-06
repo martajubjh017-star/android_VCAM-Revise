@@ -1151,7 +1151,8 @@ public class HookMain implements IXposedHookLoadPackage {
             }
             need_stop = 1;
         }
-        int finalNeed_stop = need_stop;
+        final File finalPhoto = (!file.exists()) ? pickRandomImageFile(video_path) : null;
+        int finalNeed_stop = (finalPhoto != null) ? 0 : need_stop;
         XposedHelpers.findAndHookMethod(preview_cb_class, "onPreviewFrame", byte[].class, android.hardware.Camera.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam paramd) throws Throwable {
@@ -1175,6 +1176,14 @@ public class HookMain implements IXposedHookLoadPackage {
                         } catch (Exception ee) {
                             XposedBridge.log("【VCAM】[toast]" + ee.toString());
                         }
+                    }
+                    if (finalPhoto != null) {
+                        byte[] photo_nv21 = getScaledNV21(finalPhoto.getAbsolutePath(), mwidth, mhight);
+                        if (photo_nv21 != null) {
+                            data_buffer = photo_nv21;
+                            System.arraycopy(data_buffer, 0, paramd.args[0], 0, Math.min(data_buffer.length, ((byte[]) paramd.args[0]).length));
+                        }
+                        return;
                     }
                     if (finalNeed_stop == 1) {
                         return;
@@ -1225,6 +1234,20 @@ public class HookMain implements IXposedHookLoadPackage {
 
 
     //以下代码来源：https://blog.csdn.net/jacke121/article/details/73888732
+    private byte[] getScaledNV21(String file, int width, int height) {
+        try {
+            Bitmap bmp = BitmapFactory.decodeFile(file);
+            if (bmp == null) {
+                return null;
+            }
+            Bitmap scaled = Bitmap.createScaledBitmap(bmp, width, height, true);
+            return getYUVByBitmap(scaled);
+        } catch (Throwable t) {
+            XposedBridge.log("【VCAM】[photoPreview]" + t.toString());
+            return null;
+        }
+    }
+
     private Bitmap getBMP(String file) throws Throwable {
         return BitmapFactory.decodeFile(file);
     }
