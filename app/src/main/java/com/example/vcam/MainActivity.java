@@ -24,6 +24,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.FileInputStream;
+import android.media.MediaMetadataRetriever;
 
 import java.io.File;
 import java.io.IOException;
@@ -290,36 +292,53 @@ public class MainActivity extends Activity {
         if (!((requestCode == PICK_MEDIA || requestCode == PICK_MEDIA_PRIVATE) && resultCode == Activity.RESULT_OK && data != null && data.getData() != null)) {
             return;
         }
-        Uri uri = data.getData();
-        String type = getContentResolver().getType(uri);
-        try {
-            if (requestCode == PICK_MEDIA) {
-                File dir = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/");
-                saveMediaTo(uri, type, dir);
-                Toast.makeText(this, "OK (DCIM/Camera1)", Toast.LENGTH_SHORT).show();
-            } else {
-                int okCount = 0;
-                for (String pkg : private_targets) {
-                    try {
-                        File dir = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/Android/data/" + pkg + "/files/Camera1/");
-                        saveMediaTo(uri, type, dir);
-                        okCount++;
-                    } catch (Exception ex) {
-                        Log.e("VCAM", "save " + pkg + " failed: " + ex);
+        final Uri uri = data.getData();
+        final String type = getContentResolver().getType(uri);
+        final int rc = requestCode;
+        new Thread(new Runnable() {
+            public void run() {
+                try {
+                    File framesSrc = null;
+                    if (type != null && type.startsWith("video")) {
+                        toastUi("Извлечение кадров...");
+                        framesSrc = new File(getExternalFilesDir(null), "vcam_frames_src");
+                        extractFramesToDir(uri, framesSrc);
                     }
+                    int okCount = 0;
+                    int total;
+                    if (rc == PICK_MEDIA) {
+                        File dir = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/");
+                        saveMediaTo(uri, type, dir, framesSrc);
+                        total = 1;
+                        okCount = 1;
+                    } else {
+                        total = private_targets.length;
+                        for (String pkg : private_targets) {
+                            try {
+                                File dir = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/Android/data/" + pkg + "/files/Camera1/");
+                                saveMediaTo(uri, type, dir, framesSrc);
+                                okCount++;
+                            } catch (Exception ex) {
+                                Log.e("VCAM", "save " + pkg + " failed: " + ex);
+                            }
+                        }
+                    }
+                    toastUi("OK: " + okCount + " / " + total);
+                } catch (Exception e) {
+                    toastUi("Err: " + e.getMessage());
                 }
-                Toast.makeText(this, "OK: " + okCount + " / " + private_targets.length, Toast.LENGTH_LONG).show();
             }
-        } catch (Exception e) {
-            Toast.makeText(this, "Err: " + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
+        }).start();
     }
 
-    private void saveMediaTo(Uri uri, String type, File dir) throws Exception {
+    private void saveMediaTo(Uri uri, String type, File dir, File framesSrc) throws Exception {
         if (!dir.exists()) dir.mkdirs();
+        File framesDst = new File(dir, "vcam_frames");
         if (type != null && type.startsWith("video")) {
             copyUriToFile(uri, new File(dir, "virtual.mp4"));
+            if (framesSrc != null) copyDir(framesSrc, framesDst);
         } else {
+            deleteDir(framesDst);
             InputStream is = getContentResolver().openInputStream(uri);
             Bitmap bmp = BitmapFactory.decodeStream(is);
             if (is != null) is.close();
@@ -329,6 +348,67 @@ public class MainActivity extends Activity {
             fos.close();
             PhotoToVideo.convert(bmp, 1280, 720, 4, 15, new File(dir, "virtual.mp4").getAbsolutePath());
         }
+    }
+
+    private void extractFramesToDir(Uri uri, File outDir) throws Exception {
+        deleteDir(outDir);
+        outDir.mkdirs();
+        MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+        try {
+            mmr.setDataSource(this, uri);
+            String ds = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            long durMs = 4000;
+            try { if (ds != null) durMs = Long.parseLong(ds); } catch (Exception e) { }
+            if (durMs <= 0) durMs = 4000;
+            int fps = 15;
+            long stepMs = 1000 / fps;
+            long maxMs = Math.min(durMs, 8000);
+            int count = 0;
+            for (long t = 0; t < maxMs && count < 120; t += stepMs) {
+                Bitmap frame = mmr.getFrameAtTime(t * 1000, MediaMetadataRetriever.OPTION_CLOSEST);
+                if (frame == null) continue;
+                String name = String.format(java.util.Locale.US, "f_%04d.jpg", count);
+                FileOutputStream fos = new FileOutputStream(new File(outDir, name));
+                frame.compress(Bitmap.CompressFormat.JPEG, 90, fos);
+                fos.close();
+                frame.recycle();
+                count++;
+            }
+            if (count == 0) throw new Exception("no frames extracted");
+        } finally {
+            try { mmr.release(); } catch (Exception e) { }
+        }
+    }
+
+    private void copyDir(File src, File dst) throws Exception {
+        deleteDir(dst);
+        dst.mkdirs();
+        File[] files = src.listFiles();
+        if (files == null) return;
+        for (File f : files) {
+            FileInputStream in = new FileInputStream(f);
+            FileOutputStream out = new FileOutputStream(new File(dst, f.getName()));
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            out.close();
+            in.close();
+        }
+    }
+
+    private void deleteDir(File d) {
+        if (d == null || !d.exists()) return;
+        File[] files = d.listFiles();
+        if (files != null) for (File f : files) f.delete();
+        d.delete();
+    }
+
+    private void toastUi(final String msg) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     private void copyUriToFile(Uri uri, File out) throws java.io.IOException {

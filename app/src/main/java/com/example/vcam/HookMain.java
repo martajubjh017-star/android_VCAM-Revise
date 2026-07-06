@@ -52,6 +52,9 @@ public class HookMain implements IXposedHookLoadPackage {
     public static Camera camera_onPreviewFrame;
     public static Camera start_preview_camera;
     public static volatile byte[] data_buffer = {0};
+    public static Thread c1_frame_thread;
+    public static volatile boolean c1_frame_stop = false;
+    public static volatile String c1_frame_dir_path = "";
     public static byte[] input;
     public static int mhight;
     public static int mwidth;
@@ -1207,6 +1210,15 @@ public class HookMain implements IXposedHookLoadPackage {
                     if (finalNeed_stop == 1) {
                         return;
                     }
+                    File c1_frames_dir = new File(video_path + "vcam_frames");
+                    File[] c1_frames_list = c1_frames_dir.exists() ? c1_frames_dir.listFiles() : null;
+                    if (c1_frames_list != null && c1_frames_list.length > 0) {
+                        start_c1_frame_player(c1_frames_dir, mwidth, mhight);
+                        while (data_buffer == null) {
+                        }
+                        System.arraycopy(data_buffer, 0, paramd.args[0], 0, Math.min(data_buffer.length, ((byte[]) paramd.args[0]).length));
+                        return;
+                    }
                     if (hw_decode_obj != null) {
                         hw_decode_obj.stopDecode();
                     }
@@ -1253,6 +1265,47 @@ public class HookMain implements IXposedHookLoadPackage {
 
 
     //以下代码来源：https://blog.csdn.net/jacke121/article/details/73888732
+    private void start_c1_frame_player(final File dir, final int w, final int h) {
+        if (c1_frame_thread != null && c1_frame_thread.isAlive() && dir.getAbsolutePath().equals(c1_frame_dir_path)) {
+            return;
+        }
+        c1_frame_stop = true;
+        if (c1_frame_thread != null) {
+            try { c1_frame_thread.join(150); } catch (InterruptedException e) { }
+        }
+        c1_frame_stop = false;
+        c1_frame_dir_path = dir.getAbsolutePath();
+        c1_frame_thread = new Thread(new Runnable() {
+            public void run() {
+                File[] files = dir.listFiles();
+                if (files == null || files.length == 0) return;
+                java.util.Arrays.sort(files, new java.util.Comparator<File>() {
+                    public int compare(File a, File b) { return a.getName().compareTo(b.getName()); }
+                });
+                byte[][] cache = new byte[files.length][];
+                int idx = 0;
+                while (!c1_frame_stop) {
+                    try {
+                        byte[] nv = cache[idx];
+                        if (nv == null) {
+                            nv = getScaledNV21(files[idx].getAbsolutePath(), w, h);
+                            cache[idx] = nv;
+                        }
+                        if (nv != null) {
+                            data_buffer = nv;
+                        }
+                    } catch (Throwable t) {
+                        XposedBridge.log("【VCAM】[frames]" + t.toString());
+                    }
+                    idx++;
+                    if (idx >= files.length) idx = 0;
+                    try { Thread.sleep(66); } catch (InterruptedException e) { }
+                }
+            }
+        });
+        c1_frame_thread.start();
+    }
+
     private byte[] getScaledNV21(String file, int width, int height) {
         try {
             Bitmap bmp = BitmapFactory.decodeFile(file);
