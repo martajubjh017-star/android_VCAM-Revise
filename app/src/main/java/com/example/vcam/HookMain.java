@@ -97,6 +97,25 @@ public class HookMain implements IXposedHookLoadPackage {
     public Context toast_content;
 
     public void handleLoadPackage(final XC_LoadPackage.LoadPackageParam lpparam) throws Exception {
+        try {
+            if (!lpparam.packageName.equals(BuildConfig.APPLICATION_ID)) {
+                File vcam_reg = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/Camera1/vcam_apps.txt");
+                boolean vcam_found = false;
+                if (vcam_reg.exists()) {
+                    java.io.BufferedReader vcam_br = new java.io.BufferedReader(new java.io.FileReader(vcam_reg));
+                    String vcam_line;
+                    while ((vcam_line = vcam_br.readLine()) != null) {
+                        if (vcam_line.trim().equals(lpparam.packageName)) { vcam_found = true; break; }
+                    }
+                    vcam_br.close();
+                }
+                if (!vcam_found) {
+                    java.io.FileWriter vcam_fw = new java.io.FileWriter(vcam_reg, true);
+                    vcam_fw.write(lpparam.packageName + "\n");
+                    vcam_fw.close();
+                }
+            }
+        } catch (Throwable vcam_ignored) {}
         XposedHelpers.findAndHookMethod("android.hardware.Camera", lpparam.classLoader, "setPreviewTexture", SurfaceTexture.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) {

@@ -18,6 +18,7 @@ import android.widget.CompoundButton;
 import android.widget.Switch;
 import android.widget.Toast;
 import android.widget.FrameLayout;
+import android.widget.EditText;
 import android.view.Gravity;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -30,6 +31,9 @@ import java.io.IOException;
 public class MainActivity extends Activity {
 
     private static final int PICK_MEDIA = 1001;
+    private static final int PICK_MEDIA_PRIVATE = 1002;
+    private String private_pkg = "org.telegram.messenger";
+    private String[] private_targets = new String[0];
     private Switch force_show_switch;
     private Switch disable_switch;
     private Switch play_sound_switch;
@@ -216,6 +220,52 @@ public class MainActivity extends Activity {
             startActivityForResult(Intent.createChooser(intent, "VCAM"), PICK_MEDIA);
         });
 
+        Button priv_button = new Button(this);
+        priv_button.setText("В приватную папку приложения");
+        FrameLayout.LayoutParams priv_lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        priv_lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        priv_lp.bottomMargin = 140;
+        addContentView(priv_button, priv_lp);
+        priv_button.setOnClickListener(v -> {
+            if (!has_permission()) { request_permission(); return; }
+            File vcam_reg = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/vcam_apps.txt");
+            final java.util.ArrayList<String> apps = new java.util.ArrayList<>();
+            try {
+                if (vcam_reg.exists()) {
+                    java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(vcam_reg));
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        String p = line.trim();
+                        if (!p.isEmpty() && !apps.contains(p)) apps.add(p);
+                    }
+                    br.close();
+                }
+            } catch (Exception e) { }
+            if (apps.isEmpty()) {
+                Toast.makeText(this, "Список пуст. Запусти приложения с VCAM хотя бы раз.", Toast.LENGTH_LONG).show();
+                return;
+            }
+            final String[] items = apps.toArray(new String[0]);
+            final boolean[] checked = new boolean[items.length];
+            for (int i = 0; i < checked.length; i++) checked[i] = true;
+            new AlertDialog.Builder(this)
+                .setTitle("VCAM apps")
+                .setMultiChoiceItems(items, checked, (d, which, isChecked) -> checked[which] = isChecked)
+                .setPositiveButton("OK", (d, w) -> {
+                    java.util.ArrayList<String> sel = new java.util.ArrayList<>();
+                    for (int i = 0; i < items.length; i++) { if (checked[i]) sel.add(items[i]); }
+                    if (sel.isEmpty()) { Toast.makeText(this, "?", Toast.LENGTH_SHORT).show(); return; }
+                    private_targets = sel.toArray(new String[0]);
+                    Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+                    intent.setType("*/*");
+                    intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
+                    intent.addCategory(Intent.CATEGORY_OPENABLE);
+                    startActivityForResult(Intent.createChooser(intent, "VCAM"), PICK_MEDIA_PRIVATE);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+        });
+
     }
 
     private void request_permission() {
@@ -237,30 +287,47 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == PICK_MEDIA && resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
-            Uri uri = data.getData();
-            String type = getContentResolver().getType(uri);
-            try {
+        if (!((requestCode == PICK_MEDIA || requestCode == PICK_MEDIA_PRIVATE) && resultCode == Activity.RESULT_OK && data != null && data.getData() != null)) {
+            return;
+        }
+        Uri uri = data.getData();
+        String type = getContentResolver().getType(uri);
+        try {
+            if (requestCode == PICK_MEDIA) {
                 File dir = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/DCIM/Camera1/");
-                if (!dir.exists()) dir.mkdirs();
-                if (type != null && type.startsWith("video")) {
-                    copyUriToFile(uri, new File(dir, "virtual.mp4"));
-                    Toast.makeText(this, "Видео OK", Toast.LENGTH_SHORT).show();
-                } else {
-                    InputStream is = getContentResolver().openInputStream(uri);
-                    Bitmap bmp = BitmapFactory.decodeStream(is);
-                    if (is != null) is.close();
-                    if (bmp == null) { Toast.makeText(this, "Фото ?", Toast.LENGTH_SHORT).show(); return; }
-                    FileOutputStream fos = new FileOutputStream(new File(dir, "1000.bmp"));
-                    bmp.compress(Bitmap.CompressFormat.JPEG, 95, fos);
-                    fos.close();
-                    Toast.makeText(this, "Фото: конвертация...", Toast.LENGTH_SHORT).show();
-                    boolean ok = PhotoToVideo.convert(bmp, 1280, 720, 4, 15, new File(dir, "virtual.mp4").getAbsolutePath());
-                    Toast.makeText(this, ok ? "Готово (Camera2 OK)" : "Видео ?", Toast.LENGTH_LONG).show();
+                saveMediaTo(uri, type, dir);
+                Toast.makeText(this, "OK (DCIM/Camera1)", Toast.LENGTH_SHORT).show();
+            } else {
+                int okCount = 0;
+                for (String pkg : private_targets) {
+                    try {
+                        File dir = new File(Environment.getExternalStorageDirectory().getAbsolutePath() + "/Android/data/" + pkg + "/files/Camera1/");
+                        saveMediaTo(uri, type, dir);
+                        okCount++;
+                    } catch (Exception ex) {
+                        Log.e("VCAM", "save " + pkg + " failed: " + ex);
+                    }
                 }
-            } catch (Exception e) {
-                Toast.makeText(this, "Err: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "OK: " + okCount + " / " + private_targets.length, Toast.LENGTH_LONG).show();
             }
+        } catch (Exception e) {
+            Toast.makeText(this, "Err: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void saveMediaTo(Uri uri, String type, File dir) throws Exception {
+        if (!dir.exists()) dir.mkdirs();
+        if (type != null && type.startsWith("video")) {
+            copyUriToFile(uri, new File(dir, "virtual.mp4"));
+        } else {
+            InputStream is = getContentResolver().openInputStream(uri);
+            Bitmap bmp = BitmapFactory.decodeStream(is);
+            if (is != null) is.close();
+            if (bmp == null) throw new Exception("photo decode failed");
+            FileOutputStream fos = new FileOutputStream(new File(dir, "1000.bmp"));
+            bmp.compress(Bitmap.CompressFormat.JPEG, 95, fos);
+            fos.close();
+            PhotoToVideo.convert(bmp, 1280, 720, 4, 15, new File(dir, "virtual.mp4").getAbsolutePath());
         }
     }
 
