@@ -19,9 +19,9 @@ import java.util.List;
 import de.robv.android.xposed.XposedBridge;
 
 // Patch 8b: draws LiveStreamPlayer.latestBitmap onto an arbitrary output
-// Surface using OpenGL ES 2.0 + EGL. Used to feed the app's Camera2
-// preview/reader surfaces with live face-swapped frames instead of
-// virtual.mp4. One instance == one Surface == one render thread.
+// Surface using OpenGL ES 2.0 + EGL. Used to feed the app's Camera2/Camera1
+// preview surfaces with live face-swapped frames instead of virtual.mp4.
+// One instance == one Surface == one render thread.
 public class LiveSurfaceRenderer implements Runnable {
 
     private static final List<LiveSurfaceRenderer> ACTIVE = new ArrayList<LiveSurfaceRenderer>();
@@ -88,9 +88,9 @@ public class LiveSurfaceRenderer implements Runnable {
         try {
             initEGL();
             initGL();
-            XposedBridge.log("【VCAM】[c2-gl:" + tag + "] init ok " + surfW + "x" + surfH);
+            XposedBridge.log("\u3010VCAM\u3011[c2-gl:" + tag + "] init ok " + surfW + "x" + surfH);
         } catch (Throwable t) {
-            XposedBridge.log("【VCAM】[c2-gl:" + tag + "] init FAIL " + t);
+            XposedBridge.log("\u3010VCAM\u3011[c2-gl:" + tag + "] init FAIL " + t);
             releaseEGL();
             return;
         }
@@ -102,17 +102,17 @@ public class LiveSurfaceRenderer implements Runnable {
                     drawFrame(bmp);
                     drawn++;
                     if (drawn == 1) {
-                        XposedBridge.log("【VCAM】[c2-gl:" + tag + "] first frame drawn");
+                        XposedBridge.log("\u3010VCAM\u3011[c2-gl:" + tag + "] first frame drawn");
                     }
                 }
                 Thread.sleep(16);
             } catch (Throwable t) {
-                XposedBridge.log("【VCAM】[c2-gl:" + tag + "] loop " + t);
+                XposedBridge.log("\u3010VCAM\u3011[c2-gl:" + tag + "] loop " + t);
                 try { Thread.sleep(200); } catch (InterruptedException ie) { }
             }
         }
         releaseEGL();
-        XposedBridge.log("【VCAM】[c2-gl:" + tag + "] stopped (drawn=" + drawn + ")");
+        XposedBridge.log("\u3010VCAM\u3011[c2-gl:" + tag + "] stopped (drawn=" + drawn + ")");
     }
 
     private void initEGL() {
@@ -175,11 +175,10 @@ public class LiveSurfaceRenderer implements Runnable {
         aTexLoc = GLES20.glGetAttribLocation(program, "aTex");
         uTexLoc = GLES20.glGetUniformLocation(program, "uTex");
 
-        float[] verts = { -1f, -1f,  1f, -1f,  -1f, 1f,  1f, 1f };
-        // texcoords flipped vertically (bitmap top-left -> GL bottom-left)
-        float[] texs  = {  0f,  1f,  1f,  1f,   0f, 0f,  1f, 0f };
+        float[] verts = { -1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f };
         vtxBuf = toFloatBuffer(verts);
-        texBuf = toFloatBuffer(texs);
+        // texcoords are computed per-frame in drawFrame (aspect center-crop).
+        texBuf = toFloatBuffer(new float[] { 0f, 1f, 1f, 1f, 0f, 0f, 1f, 0f });
 
         int[] tex = new int[1];
         GLES20.glGenTextures(1, tex, 0);
@@ -192,10 +191,32 @@ public class LiveSurfaceRenderer implements Runnable {
     }
 
     private void drawFrame(Bitmap bmp) {
-        GLES20.glViewport(0, 0, surfW > 0 ? surfW : bmp.getWidth(), surfH > 0 ? surfH : bmp.getHeight());
+        int vw = surfW > 0 ? surfW : bmp.getWidth();
+        int vh = surfH > 0 ? surfH : bmp.getHeight();
+        GLES20.glViewport(0, 0, vw, vh);
         GLES20.glClearColor(0f, 0f, 0f, 1f);
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
         GLES20.glUseProgram(program);
+
+        // Patch 10: aspect-preserving center-crop. Sample a centered sub-rect of
+        // the bitmap so it fills the surface without stretching.
+        float bw = bmp.getWidth();
+        float bh = bmp.getHeight();
+        float sAspect = (float) vw / (float) vh;
+        float bAspect = bw / bh;
+        float u0 = 0f, u1 = 1f, v0 = 0f, v1 = 1f;
+        if (bAspect > sAspect) {
+            float vis = sAspect / bAspect; // visible fraction of bitmap width
+            u0 = (1f - vis) / 2f;
+            u1 = 1f - u0;
+        } else if (bAspect < sAspect) {
+            float vis = bAspect / sAspect; // visible fraction of bitmap height
+            v0 = (1f - vis) / 2f;
+            v1 = 1f - v0;
+        }
+        // texcoords flipped vertically (bitmap top-left -> GL bottom-left)
+        float[] texs = { u0, v1, u1, v1, u0, v0, u1, v0 };
+        texBuf = toFloatBuffer(texs);
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texId);
