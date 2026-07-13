@@ -889,14 +889,8 @@ public class HookMain implements IXposedHookLoadPackage {
 
     private Surface create_virtual_surface() {
         if (need_recreate) {
-            if (c2_virtual_surfaceTexture != null) {
-                c2_virtual_surfaceTexture.release();
-                c2_virtual_surfaceTexture = null;
-            }
-            if (c2_virtual_surface != null) {
-                c2_virtual_surface.release();
-                c2_virtual_surface = null;
-            }
+            // === Patch 12 v4: leak old dummy surface/texture (no release) ===
+        // Do NOT free a BufferQueue Chromium's capture teardown may still hold.
             c2_virtual_surfaceTexture = new SurfaceTexture(15);
             c2_virtual_surface = new Surface(c2_virtual_surfaceTexture);
             need_recreate = false;
@@ -915,9 +909,8 @@ public class HookMain implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(hooked_class, "onOpened", CameraDevice.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                // === Patch 11 v3: stable virtual surface (no churn on resolution switch) ===
-        if (c2_virtual_surface == null) { need_recreate = true; create_virtual_surface(); }
-        // === end Patch 11 v3 ===
+                need_recreate = true;
+        create_virtual_surface();
                 if (c2_player != null) {
                     c2_player.stop();
                     c2_player.reset();
