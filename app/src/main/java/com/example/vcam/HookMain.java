@@ -915,8 +915,9 @@ public class HookMain implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(hooked_class, "onOpened", CameraDevice.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                need_recreate = true;
-                create_virtual_surface();
+                // === Patch 11 v3: stable virtual surface (no churn on resolution switch) ===
+        if (c2_virtual_surface == null) { need_recreate = true; create_virtual_surface(); }
+        // === end Patch 11 v3 ===
                 if (c2_player != null) {
                     c2_player.stop();
                     c2_player.reset();
