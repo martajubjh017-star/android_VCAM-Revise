@@ -8,14 +8,18 @@ import java.net.Socket;
 
 import de.robv.android.xposed.XposedBridge;
 
-// Live MJPEG-over-TCP receiver for VCAM (Patch 8).
+// Live MJPEG-over-TCP receiver for VCAM (Patch 8 + 8b).
 // Protocol: repeated [4-byte big-endian length][JPEG bytes].
 // With `adb reverse tcp:8080 tcp:8080`, connect to 127.0.0.1:8080 -> PC.
-// Decodes each JPEG, scales to the app's preview size, converts to NV21
-// and writes it straight into HookMain.data_buffer (same path VCAM uses
-// for its vcam_frames folder), so onPreviewFrame streams it live.
+// Camera1 path: decodes each JPEG, scales to the app's preview size,
+// converts to NV21 and writes it into HookMain.data_buffer.
+// Camera2 path (Patch 8b): the raw decoded Bitmap is also exposed as
+// `latestBitmap` so LiveSurfaceRenderer can draw it onto the app's
+// Camera2 preview/reader surfaces via OpenGL.
 public class LiveStreamPlayer {
     public static volatile boolean gotFirstFrame = false;
+    // Patch 8b: latest decoded frame for the Camera2 GL renderer.
+    public static volatile Bitmap latestBitmap = null;
 
     private static Thread thread;
     private static volatile boolean stop = false;
@@ -59,18 +63,21 @@ public class LiveStreamPlayer {
                             if (bmp == null) {
                                 continue;
                             }
+                            // Patch 8b: expose decoded frame for the Camera2 GL renderer.
+                            latestBitmap = bmp;
+                            gotFirstFrame = true;
+                            // Camera1 path: scale to preview size and convert to NV21.
                             int tw = outW > 0 ? outW : bmp.getWidth();
                             int th = outH > 0 ? outH : bmp.getHeight();
                             Bitmap scaled = Bitmap.createScaledBitmap(bmp, tw, th, true);
                             byte[] nv = bitmapToNV21(scaled);
                             if (nv != null) {
                                 HookMain.data_buffer = nv;
-                                gotFirstFrame = true;
                             }
                             if (scaled != bmp) {
                                 scaled.recycle();
                             }
-                            bmp.recycle();
+                            // NOTE: do not recycle bmp; it is retained as latestBitmap.
                         }
                     } catch (Throwable t) {
                         XposedBridge.log("【VCAM】[stream]" + t.toString());

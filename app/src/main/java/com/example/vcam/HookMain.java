@@ -713,6 +713,31 @@ public class HookMain implements IXposedHookLoadPackage {
     }
 
     private void process_camera2_play() {
+        // === Patch 8b: live stream injection (Camera2) ===
+        try {
+            File s_cfg_c2 = new File(video_path + "vcam_stream.txt");
+            if (s_cfg_c2.exists()) {
+                String s_line_c2 = "";
+                java.io.BufferedReader s_br_c2 = new java.io.BufferedReader(new java.io.FileReader(s_cfg_c2));
+                try { s_line_c2 = s_br_c2.readLine(); } finally { s_br_c2.close(); }
+                if (s_line_c2 != null) { s_line_c2 = s_line_c2.trim(); }
+                if (s_line_c2 != null && s_line_c2.contains(":")) {
+                    String s_host_c2 = s_line_c2.substring(0, s_line_c2.indexOf(":")).trim();
+                    int s_port_c2 = Integer.parseInt(s_line_c2.substring(s_line_c2.indexOf(":") + 1).trim());
+                    LiveStreamPlayer.start(s_host_c2, s_port_c2, 0, 0);
+                    LiveSurfaceRenderer.stopAll();
+                    if (c2_reader_Surfcae != null) { LiveSurfaceRenderer.startFor(c2_reader_Surfcae, "reader"); }
+                    if (c2_reader_Surfcae_1 != null) { LiveSurfaceRenderer.startFor(c2_reader_Surfcae_1, "reader1"); }
+                    if (c2_preview_Surfcae != null) { LiveSurfaceRenderer.startFor(c2_preview_Surfcae, "preview"); }
+                    if (c2_preview_Surfcae_1 != null) { LiveSurfaceRenderer.startFor(c2_preview_Surfcae_1, "preview1"); }
+                    XposedBridge.log("【VCAM】[c2-live] started reader=" + (c2_reader_Surfcae != null) + " reader1=" + (c2_reader_Surfcae_1 != null) + " preview=" + (c2_preview_Surfcae != null) + " preview1=" + (c2_preview_Surfcae_1 != null));
+                    return;
+                }
+            }
+        } catch (Throwable c2_live_t) {
+            XposedBridge.log("【VCAM】[c2-live]" + c2_live_t);
+        }
+        // === end Patch 8b ===
 
         if (c2_reader_Surfcae != null) {
             if (c2_hw_decode_obj != null) {
@@ -867,6 +892,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 c2_preview_Surfcae = null;
                 is_first_hook_build = true;
                 XposedBridge.log("【VCAM】打开相机C2");
+                LiveSurfaceRenderer.stopAll();
 
                 File file = new File(video_path + "virtual.mp4");
                 File toast_control = new File(Environment.getExternalStorageDirectory().getPath() + "/DCIM/Camera1/" + "no_toast.jpg");
