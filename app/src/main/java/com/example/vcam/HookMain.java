@@ -716,6 +716,22 @@ public class HookMain implements IXposedHookLoadPackage {
             }
         });*/
 
+        // === Patch 15 v6: advertise single capture resolution (suppress 640x480 -> 1280x720 switch) ===
+                    try {
+                        XposedHelpers.findAndHookMethod("android.hardware.camera2.params.StreamConfigurationMap", lpparam.classLoader, "getOutputSizes", int.class, new XC_MethodHook() {
+                            @Override
+                            protected void afterHookedMethod(MethodHookParam vres) {
+                                try {
+                                    android.util.Size[] arr = (android.util.Size[]) vres.getResult();
+                                    if (arr == null || arr.length <= 1) return;
+                                    android.util.Size pick = null;
+                                    for (android.util.Size s : arr) { if (s.getWidth() == 1280 && s.getHeight() == 720) { pick = s; break; } }
+                                    if (pick == null) { for (android.util.Size s : arr) { if (pick == null || (long) s.getWidth() * s.getHeight() > (long) pick.getWidth() * pick.getHeight()) pick = s; } }
+                                    if (pick != null) { vres.setResult(new android.util.Size[]{ pick }); XposedBridge.log("【VCAM】[c2-res] getOutputSizes(fmt=" + vres.args[0] + ") " + arr.length + " sizes -> pinned " + pick.getWidth() + "x" + pick.getHeight()); }
+                                } catch (Throwable vt) { XposedBridge.log("【VCAM】[c2-res] " + vt); }
+                            }
+                        });
+                    } catch (Throwable vh) { XposedBridge.log("【VCAM】[c2-res] hook failed " + vh); }
         XposedHelpers.findAndHookMethod("android.media.ImageReader", lpparam.classLoader, "newInstance", int.class, int.class, int.class, int.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) {
