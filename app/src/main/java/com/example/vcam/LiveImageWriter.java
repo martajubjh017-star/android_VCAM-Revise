@@ -51,6 +51,7 @@ public class LiveImageWriter implements Runnable {
     private Thread thread;
     private ImageWriter writer;
     private Bitmap scratch; // reusable ARGB target for center-crop scaling
+    private static final int ROT_DEG = 90; // Patch 14 v5: reader-buffer rotation compensation (flip to 270 if upside-down)
 
     private LiveImageWriter(Surface surface, String tag) {
         this.surface = surface;
@@ -60,7 +61,7 @@ public class LiveImageWriter implements Runnable {
     @Override
     public void run() {
         try {
-            writer = ImageWriter.newInstance(surface, 2);
+            writer = ImageWriter.newInstance(surface, 1);
             XposedBridge.log("\u3010VCAM\u3011[c2-iw:" + tag + "] init ok");
         } catch (Throwable t) {
             XposedBridge.log("\u3010VCAM\u3011[c2-iw:" + tag + "] init FAIL " + t);
@@ -79,9 +80,12 @@ public class LiveImageWriter implements Runnable {
                 try {
                     img = writer.dequeueInputImage();
                 } catch (Throwable dq) {
-                    // queue full / not ready yet
-                    Thread.sleep(10);
-                    continue;
+                    // Patch 14 v5: reader surface abandoned (session teardown /
+                    // resolution switch) -> stop feeding a dying surface; never hand a
+                    // buffer to a capture device that is being destroyed.
+                    XposedBridge.log("【VCAM】[c2-iw:" + tag + "] dequeue abandoned -> stop " + dq);
+                    running = false;
+                    break;
                 }
                 if (img == null) { Thread.sleep(10); continue; }
                 int fmt = img.getFormat();
@@ -96,8 +100,8 @@ public class LiveImageWriter implements Runnable {
                 } catch (Throwable ff) {
                     XposedBridge.log("\u3010VCAM\u3011[c2-iw:" + tag + "] fill " + ff);
                 }
-                if (ok) {
-                    writer.queueInputImage(img); // hands the buffer to the app's ImageReader
+                if (ok && running) {
+                    try { writer.queueInputImage(img); } catch (Throwable qq) { XposedBridge.log("【VCAM】[c2-iw:" + tag + "] queue abandoned -> stop " + qq); try { img.close(); } catch (Throwable ig) { } running = false; break; } // Patch 14 v5
                     pushed++;
                     if (pushed == 1) {
                         XposedBridge.log("\u3010VCAM\u3011[c2-iw:" + tag + "] first frame pushed");
@@ -181,12 +185,21 @@ public class LiveImageWriter implements Runnable {
         c.drawColor(0xFF000000);
         float sw = src.getWidth();
         float sh = src.getHeight();
-        float scale = Math.max(w / sw, h / sh);
-        float dx = (w - sw * scale) / 2f;
-        float dy = (h - sh * scale) / 2f;
+        // Patch 14 v5: the app rotates the camera buffer by the sensor
+        // orientation before display; storing our upright frame without matching
+        // that makes the picture come out sideways/stretched with W & H swapped.
+        // Rotate 90 deg when source & reader buffer have opposite orientation.
+        boolean srcPortrait = sh > sw;
+        boolean dstPortrait = h > w;
+        int rot = (srcPortrait != dstPortrait) ? ROT_DEG : 0;
+        float ew = (rot == 90 || rot == 270) ? sh : sw;
+        float eh = (rot == 90 || rot == 270) ? sw : sh;
+        float scale = Math.max(w / ew, h / eh);
         Matrix m = new Matrix();
+        m.postTranslate(-sw / 2f, -sh / 2f);
+        if (rot != 0) m.postRotate(rot);
         m.postScale(scale, scale);
-        m.postTranslate(dx, dy);
+        m.postTranslate(w / 2f, h / 2f);
         Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
         c.drawBitmap(src, m, p);
         return scratch;
