@@ -150,9 +150,10 @@ public class LiveImageWriter implements Runnable {
             int vLine = cLine * vRow;
             for (int i = 0; i < w; i++) {
                 int rgb = argb[rowBase + i];
-                int r = rgb & 0xFF;
+                // === Patch 13: R/B channel fix (ARGB_8888 is 0xAARRGGBB) ===
+                int r = (rgb >> 16) & 0xFF;
                 int g = (rgb >> 8) & 0xFF;
-                int b = (rgb >> 16) & 0xFF;
+                int b = rgb & 0xFF;
                 int y = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
                 if (y < 16) y = 16; else if (y > 255) y = 255;
                 yb.put(yLine + i, (byte) y);
