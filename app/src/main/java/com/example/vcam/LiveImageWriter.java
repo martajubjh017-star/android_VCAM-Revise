@@ -52,6 +52,7 @@ public class LiveImageWriter implements Runnable {
     private ImageWriter writer;
     private Bitmap scratch; // reusable ARGB target for center-crop scaling
     private static final int ROT_DEG = 90; // Patch 14 v5: reader-buffer rotation compensation (flip to 270 if upside-down)
+    public static volatile boolean sessionLive = false; // Patch 17 v8
 
     private LiveImageWriter(Surface surface, String tag) {
         this.surface = surface;
@@ -70,6 +71,7 @@ public class LiveImageWriter implements Runnable {
         int pushed = 0;
         int loggedFormat = -1;
         while (running) {
+            if (!sessionLive || surface == null || !surface.isValid()) { try { Thread.sleep(15); } catch (InterruptedException ie) { } continue; } // Patch 17 v8
             try {
                 Bitmap bmp = LiveStreamPlayer.latestBitmap;
                 if (bmp == null || bmp.isRecycled()) {
@@ -100,7 +102,7 @@ public class LiveImageWriter implements Runnable {
                 } catch (Throwable ff) {
                     XposedBridge.log("\u3010VCAM\u3011[c2-iw:" + tag + "] fill " + ff);
                 }
-                if (ok && running) {
+                if (ok && running && sessionLive) { // Patch 17 v8
                     try { writer.queueInputImage(img); } catch (Throwable qq) { XposedBridge.log("【VCAM】[c2-iw:" + tag + "] queue retry " + qq); try { img.close(); } catch (Throwable ig) { } try { Thread.sleep(80); } catch (InterruptedException ie) { } continue; } // Patch 16 v7
                     pushed++;
                     if (pushed == 1) {

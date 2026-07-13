@@ -925,6 +925,7 @@ public class HookMain implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(hooked_class, "onOpened", CameraDevice.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                LiveImageWriter.sessionLive = false; // Patch 17 v8
                 need_recreate = true;
         create_virtual_surface();
                 if (c2_player != null) {
@@ -1370,6 +1371,7 @@ public class HookMain implements IXposedHookLoadPackage {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 XposedBridge.log("【VCAM】onConfigured ：" + param.args[0].toString());
+                LiveImageWriter.sessionLive = true; // Patch 17 v8
             }
         });
 
@@ -1377,6 +1379,7 @@ public class HookMain implements IXposedHookLoadPackage {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
                 XposedBridge.log("【VCAM】onClosed ："+ param.args[0].toString());
+                LiveImageWriter.sessionLive = false; LiveImageWriter.stopAll(); // Patch 17 v8
             }
         });
     }
