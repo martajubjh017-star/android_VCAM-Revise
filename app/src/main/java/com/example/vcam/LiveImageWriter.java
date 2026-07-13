@@ -61,7 +61,7 @@ public class LiveImageWriter implements Runnable {
     @Override
     public void run() {
         try {
-            writer = ImageWriter.newInstance(surface, 1);
+            writer = ImageWriter.newInstance(surface, 2); // Patch 16 v7: buffer 1->2 (feeder headroom, reverts v5)
             XposedBridge.log("\u3010VCAM\u3011[c2-iw:" + tag + "] init ok");
         } catch (Throwable t) {
             XposedBridge.log("\u3010VCAM\u3011[c2-iw:" + tag + "] init FAIL " + t);
@@ -83,9 +83,9 @@ public class LiveImageWriter implements Runnable {
                     // Patch 14 v5: reader surface abandoned (session teardown /
                     // resolution switch) -> stop feeding a dying surface; never hand a
                     // buffer to a capture device that is being destroyed.
-                    XposedBridge.log("【VCAM】[c2-iw:" + tag + "] dequeue abandoned -> stop " + dq);
-                    running = false;
-                    break;
+                    XposedBridge.log("【VCAM】[c2-iw:" + tag + "] dequeue retry " + dq); // Patch 16 v7
+                    try { Thread.sleep(80); } catch (InterruptedException ie) { }
+                    continue;
                 }
                 if (img == null) { Thread.sleep(10); continue; }
                 int fmt = img.getFormat();
@@ -101,7 +101,7 @@ public class LiveImageWriter implements Runnable {
                     XposedBridge.log("\u3010VCAM\u3011[c2-iw:" + tag + "] fill " + ff);
                 }
                 if (ok && running) {
-                    try { writer.queueInputImage(img); } catch (Throwable qq) { XposedBridge.log("【VCAM】[c2-iw:" + tag + "] queue abandoned -> stop " + qq); try { img.close(); } catch (Throwable ig) { } running = false; break; } // Patch 14 v5
+                    try { writer.queueInputImage(img); } catch (Throwable qq) { XposedBridge.log("【VCAM】[c2-iw:" + tag + "] queue retry " + qq); try { img.close(); } catch (Throwable ig) { } try { Thread.sleep(80); } catch (InterruptedException ie) { } continue; } // Patch 16 v7
                     pushed++;
                     if (pushed == 1) {
                         XposedBridge.log("\u3010VCAM\u3011[c2-iw:" + tag + "] first frame pushed");
