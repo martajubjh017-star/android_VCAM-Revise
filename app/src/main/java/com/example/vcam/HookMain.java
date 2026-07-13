@@ -403,6 +403,40 @@ public class HookMain implements IXposedHookLoadPackage {
                 is_someone_playing = false;
                 XposedBridge.log("【VCAM】开始预览");
                 start_preview_camera = (Camera) param.thisObject;
+
+                // === Patch 9: live stream injection (Camera1 preview surface) ===
+                try {
+                    File s_cfg_c1 = new File(video_path + "vcam_stream.txt");
+                    if (s_cfg_c1.exists()) {
+                        String s_line_c1 = "";
+                        java.io.BufferedReader s_br_c1 = new java.io.BufferedReader(new java.io.FileReader(s_cfg_c1));
+                        try { s_line_c1 = s_br_c1.readLine(); } finally { s_br_c1.close(); }
+                        if (s_line_c1 != null) { s_line_c1 = s_line_c1.trim(); }
+                        if (s_line_c1 != null && s_line_c1.contains(":")) {
+                            String s_host_c1 = s_line_c1.substring(0, s_line_c1.indexOf(":")).trim();
+                            int s_port_c1 = Integer.parseInt(s_line_c1.substring(s_line_c1.indexOf(":") + 1).trim());
+                            LiveStreamPlayer.start(s_host_c1, s_port_c1, 0, 0);
+                            LiveSurfaceRenderer.stopAll();
+                            if (mplayer1 != null) { try { mplayer1.release(); } catch (Throwable ig1) {} mplayer1 = null; }
+                            if (mMediaPlayer != null) { try { mMediaPlayer.release(); } catch (Throwable ig2) {} mMediaPlayer = null; }
+                            String c1_started = "";
+                            if (ori_holder != null && ori_holder.getSurface() != null && ori_holder.getSurface().isValid()) {
+                                LiveSurfaceRenderer.startFor(ori_holder.getSurface(), "c1holder");
+                                c1_started += "holder ";
+                            }
+                            if (mSurfacetexture != null) {
+                                if (mSurface == null) { mSurface = new Surface(mSurfacetexture); }
+                                else { mSurface.release(); mSurface = new Surface(mSurfacetexture); }
+                                LiveSurfaceRenderer.startFor(mSurface, "c1tex");
+                                c1_started += "tex ";
+                            }
+                            XposedBridge.log("【VCAM】[c1-live] started " + c1_started);
+                            return;
+                        }
+                    }
+                } catch (Throwable c1_live_t) {
+                    XposedBridge.log("【VCAM】[c1-live]" + c1_live_t);
+                }
                 if (ori_holder != null) {
 
                     if (mplayer1 == null) {
