@@ -1210,6 +1210,37 @@ public class HookMain implements IXposedHookLoadPackage {
                     if (finalNeed_stop == 1) {
                         return;
                     }
+                    // ==== VCAM live stream (MJPEG over TCP) - Patch 8 ====
+                    File vcam_stream_cfg = new File(video_path + "vcam_stream.txt");
+                    if (vcam_stream_cfg.exists()) {
+                        try {
+                            java.io.BufferedReader s_br = new java.io.BufferedReader(new java.io.FileReader(vcam_stream_cfg));
+                            String s_line = s_br.readLine();
+                            s_br.close();
+                            if (s_line != null && s_line.trim().length() > 0) {
+                                s_line = s_line.trim();
+                                String s_host = "127.0.0.1";
+                                int s_port = 8080;
+                                int s_colon = s_line.lastIndexOf(':');
+                                if (s_colon > 0) {
+                                    s_host = s_line.substring(0, s_colon).trim();
+                                    s_port = Integer.parseInt(s_line.substring(s_colon + 1).trim());
+                                } else {
+                                    s_host = s_line;
+                                }
+                                LiveStreamPlayer.start(s_host, s_port, mwidth, mhight);
+                                long s_wait = System.currentTimeMillis();
+                                while (!LiveStreamPlayer.gotFirstFrame && System.currentTimeMillis() - s_wait < 3000) { }
+                                if (LiveStreamPlayer.gotFirstFrame && data_buffer != null) {
+                                    System.arraycopy(data_buffer, 0, paramd.args[0], 0, Math.min(data_buffer.length, ((byte[]) paramd.args[0]).length));
+                                    return;
+                                }
+                            }
+                        } catch (Throwable s_t) {
+                            XposedBridge.log("【VCAM】[stream-cfg]" + s_t.toString());
+                        }
+                    }
+                    // ==== end live stream ====
                     File c1_frames_dir = new File(video_path + "vcam_frames");
                     File[] c1_frames_list = c1_frames_dir.exists() ? c1_frames_dir.listFiles() : null;
                     if (c1_frames_list != null && c1_frames_list.length > 0) {
