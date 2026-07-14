@@ -52,6 +52,12 @@ public class LiveImageWriter implements Runnable {
     private ImageWriter writer;
     private Bitmap scratch; // reusable ARGB target for center-crop scaling
     private static final int ROT_DEG = 90; // Patch 14 v5: reader-buffer rotation compensation (flip to 270 if upside-down)
+    // Patch 18 v9: settle-window debounce (skip feeding during Chromium open/close churn)
+    private static final long SETTLE_MS = 800;
+    private static volatile long latestGen = 0;
+    private static volatile long lastBirthMs = 0;
+    private final long myGen = nextGen();
+    private static synchronized long nextGen() { lastBirthMs = System.currentTimeMillis(); return ++latestGen; }
     public static volatile boolean sessionLive = false; // Patch 17 v8
 
     private LiveImageWriter(Surface surface, String tag) {
@@ -71,6 +77,11 @@ public class LiveImageWriter implements Runnable {
         int pushed = 0;
         int loggedFormat = -1;
         while (running) {
+            // Patch 18 v9: only the newest feeder pushes, and only after churn settles
+            if (myGen != latestGen || System.currentTimeMillis() - lastBirthMs < SETTLE_MS) {
+                try { Thread.sleep(20); } catch (InterruptedException __ie) { }
+                continue;
+            }
             if (!sessionLive || surface == null || !surface.isValid()) { try { Thread.sleep(15); } catch (InterruptedException ie) { } continue; } // Patch 17 v8
             try {
                 Bitmap bmp = LiveStreamPlayer.latestBitmap;
