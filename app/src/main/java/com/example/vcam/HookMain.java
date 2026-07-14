@@ -732,6 +732,20 @@ public class HookMain implements IXposedHookLoadPackage {
                             }
                         });
                     } catch (Throwable vh) { XposedBridge.log("【VCAM】[c2-res] hook failed " + vh); }
+        // === Patch 19 v10: stop feeder before Chromium tears down its reader ===
+        try {
+            XposedHelpers.findAndHookMethod("android.media.ImageReader", lpparam.classLoader, "close", new XC_MethodHook() {
+                @Override
+                protected void beforeHookedMethod(MethodHookParam param) {
+                    try {
+                        LiveImageWriter.sessionLive = false;
+                        LiveImageWriter.stopAll();
+                        XposedBridge.log("【VCAM】[c2-teardown] ImageReader.close -> feeder stopped");
+                        Thread.sleep(60);
+                    } catch (Throwable c2_td_in) { XposedBridge.log("【VCAM】[c2-teardown] " + c2_td_in); }
+                }
+            });
+        } catch (Throwable c2_td_h) { XposedBridge.log("【VCAM】[c2-teardown] hook failed " + c2_td_h); }
         XposedHelpers.findAndHookMethod("android.media.ImageReader", lpparam.classLoader, "newInstance", int.class, int.class, int.class, int.class, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) {
